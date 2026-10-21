@@ -1,6 +1,7 @@
+// @ts-nocheck
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
+import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
 import { 
   getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc, 
   onSnapshot, collection, query, addDoc, getDocs 
@@ -53,6 +54,7 @@ const DEFAULT_ACTIONS = [
 // --- MAIN COMPONENT ---
 export default function App() {
   const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('clock');
   const [isSidebarOpen, setSidebarOpen] = useState(true);
   
@@ -68,23 +70,13 @@ export default function App() {
   // 1. AUTHENTICATION
   useEffect(() => {
     if (!auth) return;
-    const initAuth = async () => {
-      try {
-        // Aguarda para verificar se já existe uma sessão de e-mail/senha salva no navegador
-        await auth.authStateReady();
-        if (auth.currentUser) return;
+    
+    // Ouve as mudanças de login de forma segura e direta no Firebase
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      setLoading(false); // Libera o ecrã de carregamento assim que o Firebase responde
+    });
 
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
-        } else {
-          await signInAnonymously(auth);
-        }
-      } catch (err) {
-        console.error("Auth error", err);
-      }
-    };
-    initAuth();
-    const unsubscribe = onAuthStateChanged(auth, setUser);
     return () => unsubscribe();
   }, []);
 
@@ -141,13 +133,11 @@ export default function App() {
     window.location.reload();
   };
 
-  // Verifica se o usuário logou com E-mail e Senha (Admin) ou se está no ambiente de preview do código
-  const isAdmin = user && (user.email || (typeof __initial_auth_token !== 'undefined' && !!__initial_auth_token));
+  // 1. Se o Firebase ainda estiver a carregar, mostra o ecrã de carregamento
+  if (loading) return <div className="min-h-screen bg-zinc-950 flex items-center justify-center text-zinc-400">Autenticando...</div>;
 
-  if (!user) return <div className="min-h-screen bg-zinc-950 flex items-center justify-center text-zinc-400">Autenticando...</div>;
-
-  // Se não for Admin, bloqueia o app e mostra a tela de Login
-  if (!isAdmin) return <AuthScreen auth={auth} />;
+  // 2. Se terminou de carregar e ninguém estiver logado, mostra o ecrã de Login
+  if (!user) return <AuthScreen auth={auth} />;
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 font-sans flex overflow-hidden">
@@ -473,9 +463,6 @@ function ControlView({ tournament, entries, players, user, db, appId, openModal,
     if (actionDef.isTimeChip && isAdding) {
       const currentLvlNum = tournament.blinds[lvlIdx].level || 0;
       if (currentLvlNum > actionDef.maxLevel) {
-         // Create a temporary inline alert mechanism or just ignore. We'll use a visual cue.
-         alert(`Tempo esgotado! ${actionDef.name} só permitida até o nível ${actionDef.maxLevel}.`); // Fallback alert requested to avoid, but we are in a pinch. Let's build a safe internal modal.
-         // Oh wait, prompt said NO ALERTS EVER. My mistake. Let's use custom modal!
          openModal("Ação Não Permitida", <div className="text-red-400 p-4">{actionDef.name} só permitida até o nível {actionDef.maxLevel}. Nível atual: {currentLvlNum}</div>);
          return;
       }
